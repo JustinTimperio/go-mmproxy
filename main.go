@@ -13,25 +13,56 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/path-network/go-mmproxy/mmproxy"
+	"github.com/path-network/go-mmproxy/shared"
 	"go.uber.org/zap"
 )
 
-type options struct {
-	Protocol           string
-	ListenAddr         string
-	TargetAddr4        string
-	TargetAddr6        string
-	Mark               int
-	Verbose            int
-	allowedSubnetsPath string
-	AllowedSubnets     []*net.IPNet
-	Listeners          int
-	Logger             *zap.Logger
-	udpCloseAfter      int
-	UDPCloseAfter      time.Duration
-}
+var Opts shared.Options
 
-var Opts options
+func main() {
+	flag.Parse()
+	if err := initLogger(); err != nil {
+		log.Fatalf("Failed to initialize logging: %s", err.Error())
+	}
+	defer Opts.Logger.Sync()
+
+	if Opts.AllowedSubnetsPath != "" {
+		if err := loadAllowedSubnets(); err != nil {
+			Opts.Logger.Fatal("failed to load allowed subnets file",
+				zap.String("path", Opts.AllowedSubnetsPath), zap.Error(err))
+		}
+	}
+
+	if Opts.Protocol != "tcp" && Opts.Protocol != "udp" {
+		Opts.Logger.Fatal("--protocol has to be one of udp, tcp", zap.String("protocol", Opts.Protocol))
+	}
+
+	if Opts.Mark < 0 {
+		Opts.Logger.Fatal("--mark has to be >= 0", zap.Int("mark", Opts.Mark))
+	}
+
+	if Opts.Verbose < 0 {
+		Opts.Logger.Fatal("-v has to be >= 0", zap.Int("verbose", Opts.Verbose))
+	}
+
+	if Opts.Listeners < 1 {
+		Opts.Logger.Fatal("--listeners has to be >= 1")
+	}
+
+	if Opts.UDPCloseAfter < 0 {
+		Opts.Logger.Fatal("--close-after has to be >= 0", zap.Int("close-after", Opts.UDPCloseAfterInt))
+	}
+	Opts.UDPCloseAfter = time.Duration(Opts.UDPCloseAfterInt) * time.Second
+
+	listenErrors := make(chan error, Opts.Listeners)
+	for i := 0; i < Opts.Listeners; i++ {
+		go listen(i, listenErrors)
+	}
+	for i := 0; i < Opts.Listeners; i++ {
+		<-listenErrors
+	}
+}
 
 func init() {
 	flag.StringVar(&Opts.Protocol, "p", "tcp", "Protocol that will be proxied: tcp, udp")
@@ -42,11 +73,11 @@ func init() {
 	flag.IntVar(&Opts.Verbose, "v", 0, `0 - no logging of individual connections
 1 - log errors occurring in individual connections
 2 - log all state changes of individual connections`)
-	flag.StringVar(&Opts.allowedSubnetsPath, "allowed-subnets", "",
+	flag.StringVar(&Opts.AllowedSubnetsPath, "allowed-subnets", "",
 		"Path to a file that contains allowed subnets of the proxy servers")
 	flag.IntVar(&Opts.Listeners, "listeners", 1,
 		"Number of listener sockets that will be opened for the listen address (Linux 3.9+)")
-	flag.IntVar(&Opts.udpCloseAfter, "close-after", 60, "Number of seconds after which UDP socket will be cleaned up")
+	flag.IntVar(&Opts.UDPCloseAfterInt, "close-after", 60, "Number of seconds after which UDP socket will be cleaned up")
 }
 
 func listen(listenerNum int, errors chan<- error) {
@@ -66,14 +97,14 @@ func listen(listenerNum int, errors chan<- error) {
 	}
 
 	if Opts.Protocol == "tcp" {
-		TCPListen(&listenConfig, logger, errors)
+		mmproxy.TCPListen(&listenConfig, logger, errors, Opts)
 	} else {
-		UDPListen(&listenConfig, logger, errors)
+		mmproxy.UDPListen(&listenConfig, logger, errors, Opts)
 	}
 }
 
 func loadAllowedSubnets() error {
-	file, err := os.Open(Opts.allowedSubnetsPath)
+	file, err := os.Open(Opts.AllowedSubnetsPath)
 	if err != nil {
 		return err
 	}
@@ -104,48 +135,4 @@ func initLogger() error {
 		Opts.Logger = l
 	}
 	return err
-}
-
-func main() {
-	flag.Parse()
-	if err := initLogger(); err != nil {
-		log.Fatalf("Failed to initialize logging: %s", err.Error())
-	}
-	defer Opts.Logger.Sync()
-
-	if Opts.allowedSubnetsPath != "" {
-		if err := loadAllowedSubnets(); err != nil {
-			Opts.Logger.Fatal("failed to load allowed subnets file",
-				zap.String("path", Opts.allowedSubnetsPath), zap.Error(err))
-		}
-	}
-
-	if Opts.Protocol != "tcp" && Opts.Protocol != "udp" {
-		Opts.Logger.Fatal("--protocol has to be one of udp, tcp", zap.String("protocol", Opts.Protocol))
-	}
-
-	if Opts.Mark < 0 {
-		Opts.Logger.Fatal("--mark has to be >= 0", zap.Int("mark", Opts.Mark))
-	}
-
-	if Opts.Verbose < 0 {
-		Opts.Logger.Fatal("-v has to be >= 0", zap.Int("verbose", Opts.Verbose))
-	}
-
-	if Opts.Listeners < 1 {
-		Opts.Logger.Fatal("--listeners has to be >= 1")
-	}
-
-	if Opts.udpCloseAfter < 0 {
-		Opts.Logger.Fatal("--close-after has to be >= 0", zap.Int("close-after", Opts.udpCloseAfter))
-	}
-	Opts.UDPCloseAfter = time.Duration(Opts.udpCloseAfter) * time.Second
-
-	listenErrors := make(chan error, Opts.Listeners)
-	for i := 0; i < Opts.Listeners; i++ {
-		go listen(i, listenErrors)
-	}
-	for i := 0; i < Opts.Listeners; i++ {
-		<-listenErrors
-	}
 }

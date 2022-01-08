@@ -99,4 +99,4 @@ tcpkali -c 50 -T 10s -e1 'PROXY TCP4 127.0.0.1 127.0.0.1 \{connection.uid} 25578
 | go-mmproxy              | 45483.233 | 16142.348 | 29340.885 | 1477889.6 | 2518271.5 |
 | no proxy                | 52640.116 | 22561.129 | 30078.987 | 2065805.4 | 2581621.3 |
 
-![result barchart](benchmark.png)
+![result barchart](examples/benchmark.png)

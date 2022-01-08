@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package mmproxy
 
 import (
 	"context"
 	"io"
 	"net"
 
+	"github.com/path-network/go-mmproxy/shared"
 	"go.uber.org/zap"
 )
 
@@ -17,12 +18,12 @@ func tcpCopyData(dst net.Conn, src net.Conn, ch chan<- error) {
 	ch <- err
 }
 
-func tcpHandleConnection(conn net.Conn, logger *zap.Logger) {
+func tcpHandleConnection(Opts shared.Options, conn net.Conn, logger *zap.Logger) {
 	defer conn.Close()
 	logger = logger.With(zap.String("remoteAddr", conn.RemoteAddr().String()),
 		zap.String("localAddr", conn.LocalAddr().String()))
 
-	if !CheckOriginAllowed(conn.RemoteAddr().(*net.TCPAddr).IP) {
+	if !CheckOriginAllowed(conn.RemoteAddr().(*net.TCPAddr).IP, Opts) {
 		logger.Debug("connection origin not in allowed subnets", zap.Bool("dropConnection", true))
 		return
 	}
@@ -70,7 +71,7 @@ func tcpHandleConnection(conn net.Conn, logger *zap.Logger) {
 
 	dialer := net.Dialer{LocalAddr: saddr}
 	if saddr != nil {
-		dialer.Control = DialUpstreamControl(saddr.(*net.TCPAddr).Port)
+		dialer.Control = DialUpstreamControl(saddr.(*net.TCPAddr).Port, Opts)
 	}
 	upstreamConn, err := dialer.Dial("tcp", targetAddr)
 	if err != nil {
@@ -120,7 +121,7 @@ func tcpHandleConnection(conn net.Conn, logger *zap.Logger) {
 	}
 }
 
-func TCPListen(listenConfig *net.ListenConfig, logger *zap.Logger, errors chan<- error) {
+func TCPListen(listenConfig *net.ListenConfig, logger *zap.Logger, errors chan<- error, Opts shared.Options) {
 	ctx := context.Background()
 	ln, err := listenConfig.Listen(ctx, "tcp", Opts.ListenAddr)
 	if err != nil {
@@ -139,6 +140,6 @@ func TCPListen(listenConfig *net.ListenConfig, logger *zap.Logger, errors chan<-
 			return
 		}
 
-		go tcpHandleConnection(conn, logger)
+		go tcpHandleConnection(Opts, conn, logger)
 	}
 }

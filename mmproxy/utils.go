@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package mmproxy
 
 import (
 	"fmt"
 	"net"
 	"strings"
 	"syscall"
+
+	"github.com/path-network/go-mmproxy/shared"
 )
 
 type Protocol int
@@ -18,7 +20,7 @@ const (
 	UDP
 )
 
-func CheckOriginAllowed(remoteIP net.IP) bool {
+func CheckOriginAllowed(remoteIP net.IP, Opts shared.Options) bool {
 	if len(Opts.AllowedSubnets) == 0 {
 		return true
 	}
@@ -31,7 +33,7 @@ func CheckOriginAllowed(remoteIP net.IP) bool {
 	return false
 }
 
-func DialUpstreamControl(sport int) func(string, string, syscall.RawConn) error {
+func DialUpstreamControl(sport int, Opts shared.Options) func(string, string, syscall.RawConn) error {
 	return func(network, address string, c syscall.RawConn) error {
 		var syscallErr error
 		err := c.Control(func(fd uintptr) {
